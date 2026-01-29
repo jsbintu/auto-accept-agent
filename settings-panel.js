@@ -86,6 +86,9 @@ class SettingsPanel {
                     case 'dismissPrompt':
                         await this.handleDismiss();
                         break;
+                    case 'cancelSubscription':
+                        await this.handleCancelSubscription();
+                        break;
                 }
             },
             null,
@@ -98,6 +101,72 @@ class SettingsPanel {
         const now = Date.now();
         await this.context.globalState.update('auto-accept-lastDismissedAt', now);
         this.dispose();
+    }
+
+    async handleCancelSubscription() {
+        const userId = this.getUserId();
+
+        vscode.window.withProgress(
+            {
+                location: vscode.ProgressLocation.Notification,
+                title: 'Processing cancellation request...',
+                cancellable: false
+            },
+            async (progress) => {
+                try {
+                    const https = require('https');
+                    const postData = JSON.stringify({ userId });
+
+                    const options = {
+                        hostname: 'auto-accept-backend.onrender.com',
+                        path: '/api/cancel-subscription',
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Content-Length': Buffer.byteLength(postData)
+                        }
+                    };
+
+                    const result = await new Promise((resolve, reject) => {
+                        const req = https.request(options, (res) => {
+                            let data = '';
+                            res.on('data', chunk => data += chunk);
+                            res.on('end', () => {
+                                try {
+                                    resolve({ statusCode: res.statusCode, data: JSON.parse(data) });
+                                } catch (e) {
+                                    resolve({ statusCode: res.statusCode, data: {} });
+                                }
+                            });
+                        });
+                        req.on('error', reject);
+                        req.write(postData);
+                        req.end();
+                    });
+
+                    if (result.statusCode === 200) {
+                        vscode.window.showInformationMessage(
+                            'Subscription cancelled. You will retain Pro access until the end of your billing period.',
+                            'OK'
+                        );
+                    } else {
+                        vscode.window.showErrorMessage(
+                            'Failed to cancel subscription. Please contact support or manage your subscription via Stripe customer portal.',
+                            'Contact Support'
+                        ).then(selection => {
+                            if (selection === 'Contact Support') {
+                                vscode.env.openExternal(vscode.Uri.parse('https://github.com/MunKhin/auto-accept-agent/issues'));
+                            }
+                        });
+                    }
+                } catch (error) {
+                    vscode.window.showErrorMessage(
+                        'Network error. Please try again or contact support.',
+                        'OK'
+                    );
+                }
+            }
+        );
     }
 
     async handleCheckPro() {
@@ -116,6 +185,12 @@ class SettingsPanel {
 
     isPro() {
         return this.context.globalState.get('auto-accept-isPro', false);
+    }
+
+    isPlanRecurring() {
+        const plan = this.context.globalState.get('auto-accept-plan', 'lifetime');
+        // Only monthly and yearly plans are recurring (can be canceled)
+        return plan === 'monthly' || plan === 'yearly' || plan === 'pro';
     }
 
     getUserId() {
@@ -399,6 +474,23 @@ class SettingsPanel {
                 border-color: var(--accent);
             }
 
+            .btn-danger {
+                background: transparent;
+                border: 1px solid rgba(239, 68, 68, 0.3);
+                color: #ef4444;
+                padding: 10px 16px;
+                border-radius: 8px;
+                font-size: 12px;
+                font-weight: 600;
+                cursor: pointer;
+                transition: all 0.2s ease;
+                width: 100%;
+            }
+            .btn-danger:hover {
+                background: rgba(239, 68, 68, 0.1);
+                border-color: #ef4444;
+            }
+
             .link-secondary {
                 color: var(--accent);
                 cursor: pointer;
@@ -558,6 +650,19 @@ class SettingsPanel {
                     <div id="bannedStatus" style="font-size: 12px; margin-top: 12px; text-align: center; height: 18px;"></div>
                 </div>
 
+                ${isPro && this.isPlanRecurring() ? `
+                <div class="section">
+                    <div class="section-label">💳 SUBSCRIPTION</div>
+                    <div style="font-size: 13px; opacity: 0.6; margin-bottom: 16px; line-height: 1.5;">
+                        Manage your Auto Accept Pro subscription
+                    </div>
+                    <button id="cancelSubBtn" class="btn-danger">
+                        Cancel Subscription
+                    </button>
+                    <div id="cancelStatus" style="font-size: 12px; margin-top: 12px; text-align: center; height: 18px;"></div>
+                </div>
+                ` : ''}
+
                 <div style="text-align: center; opacity: 0.15; font-size: 10px; padding: 20px 0; letter-spacing: 1px;">
                     REF: ${userId}
                 </div>
@@ -611,6 +716,17 @@ class SettingsPanel {
                         bannedStatus.innerText = '✓ Defaults Restored';
                         bannedStatus.style.color = 'var(--accent)';
                         setTimeout(() => { bannedStatus.innerText = ''; }, 3000);
+                    });
+                }
+
+                const cancelSubBtn = document.getElementById('cancelSubBtn');
+                const cancelStatus = document.getElementById('cancelStatus');
+
+                if (cancelSubBtn) {
+                    cancelSubBtn.addEventListener('click', () => {
+                        if (confirm('Are you sure you want to cancel your Pro subscription? You will lose access to Pro features at the end of your billing period.')) {
+                            vscode.postMessage({ command: 'cancelSubscription' });
+                        }
                     });
                 }
 
@@ -683,6 +799,10 @@ class SettingsPanel {
                 res.on('end', () => {
                     try {
                         const json = JSON.parse(data);
+                        // Store plan type for subscription management
+                        if (json.plan) {
+                            this.context.globalState.update('auto-accept-plan', json.plan);
+                        }
                         resolve(json.isPro === true);
                     } catch (e) {
                         resolve(false);

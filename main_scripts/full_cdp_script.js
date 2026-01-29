@@ -265,6 +265,12 @@
         const rawNames = Array.from(tabs).map(tab => stripTimeSuffix(tab.textContent));
         const tabNames = deduplicateNames(rawNames);
 
+        // Don't clear tabs if temporarily empty (DOM refresh) - keep previous state
+        if (tabNames.length === 0 && window.__autoAcceptState.tabNames?.length > 0) {
+            log(`updateTabNames: Tabs temporarily empty, keeping previous state (${window.__autoAcceptState.tabNames.length} tabs)`);
+            return;
+        }
+
         if (JSON.stringify(window.__autoAcceptState.tabNames) !== JSON.stringify(tabNames)) {
             log(`updateTabNames: Detected ${tabNames.length} tabs: ${tabNames.join(', ')}`);
             window.__autoAcceptState.tabNames = tabNames;
@@ -343,7 +349,14 @@
             log(`[Overlay] Found panel for ${ide}, syncing position`);
             const sync = () => {
                 const r = panel.getBoundingClientRect();
-                Object.assign(overlay.style, { top: r.top + 'px', left: r.left + 'px', width: r.width + 'px', height: r.height + 'px' });
+                // Only sync if panel has valid dimensions (not collapsed/hidden)
+                if (r.width > 50 && r.height > 50) {
+                    Object.assign(overlay.style, { top: r.top + 'px', left: r.left + 'px', width: r.width + 'px', height: r.height + 'px' });
+                } else {
+                    // Panel collapsed - use fallback fullscreen
+                    log('[Overlay] Panel collapsed, using fullscreen fallback');
+                    Object.assign(overlay.style, { top: '0', left: '0', width: '100%', height: '100%' });
+                }
             };
             sync();
             new ResizeObserver(sync).observe(panel);
@@ -812,15 +825,15 @@
 
             await new Promise(r => setTimeout(r, 800));
 
-            // Optional: click New Tab button to cycle
+            // Click tab panel button to ensure tabs are visible/cycled
             const nt = queryAll("[data-tooltip-id='new-conversation-tooltip']")[0];
             if (nt) {
-                log(`[Loop] Cycle ${cycle}: Clicking New Tab button`);
+                log(`[Loop] Cycle ${cycle}: Clicking tab panel button`);
                 nt.click();
             }
-            await new Promise(r => setTimeout(r, 1000));
+            await new Promise(r => setTimeout(r, 1500)); // Longer wait for DOM to settle
 
-            // Re-query tabs after potential navigation
+            // Query existing tabs
             const tabsAfter = queryAll('button.grow');
             log(`[Loop] Cycle ${cycle}: Found ${tabsAfter.length} tabs`);
             updateTabNames(tabsAfter);

@@ -88,6 +88,9 @@ var require_settings_panel = __commonJS({
               case "dismissPrompt":
                 await this.handleDismiss();
                 break;
+              case "cancelSubscription":
+                await this.handleCancelSubscription();
+                break;
             }
           },
           null,
@@ -98,6 +101,67 @@ var require_settings_panel = __commonJS({
         const now = Date.now();
         await this.context.globalState.update("auto-accept-lastDismissedAt", now);
         this.dispose();
+      }
+      async handleCancelSubscription() {
+        const userId = this.getUserId();
+        vscode2.window.withProgress(
+          {
+            location: vscode2.ProgressLocation.Notification,
+            title: "Processing cancellation request...",
+            cancellable: false
+          },
+          async (progress) => {
+            try {
+              const https = require("https");
+              const postData = JSON.stringify({ userId });
+              const options = {
+                hostname: "auto-accept-backend.onrender.com",
+                path: "/api/cancel-subscription",
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                  "Content-Length": Buffer.byteLength(postData)
+                }
+              };
+              const result = await new Promise((resolve, reject) => {
+                const req = https.request(options, (res) => {
+                  let data = "";
+                  res.on("data", (chunk) => data += chunk);
+                  res.on("end", () => {
+                    try {
+                      resolve({ statusCode: res.statusCode, data: JSON.parse(data) });
+                    } catch (e) {
+                      resolve({ statusCode: res.statusCode, data: {} });
+                    }
+                  });
+                });
+                req.on("error", reject);
+                req.write(postData);
+                req.end();
+              });
+              if (result.statusCode === 200) {
+                vscode2.window.showInformationMessage(
+                  "Subscription cancelled. You will retain Pro access until the end of your billing period.",
+                  "OK"
+                );
+              } else {
+                vscode2.window.showErrorMessage(
+                  "Failed to cancel subscription. Please contact support or manage your subscription via Stripe customer portal.",
+                  "Contact Support"
+                ).then((selection) => {
+                  if (selection === "Contact Support") {
+                    vscode2.env.openExternal(vscode2.Uri.parse("https://github.com/MunKhin/auto-accept-agent/issues"));
+                  }
+                });
+              }
+            } catch (error) {
+              vscode2.window.showErrorMessage(
+                "Network error. Please try again or contact support.",
+                "OK"
+              );
+            }
+          }
+        );
       }
       async handleCheckPro() {
         const isPro2 = await this.checkProStatus(this.getUserId());
@@ -113,6 +177,10 @@ var require_settings_panel = __commonJS({
       }
       isPro() {
         return this.context.globalState.get("auto-accept-isPro", false);
+      }
+      isPlanRecurring() {
+        const plan = this.context.globalState.get("auto-accept-plan", "lifetime");
+        return plan === "monthly" || plan === "yearly" || plan === "pro";
       }
       getUserId() {
         let userId = this.context.globalState.get("auto-accept-userId");
@@ -380,6 +448,23 @@ var require_settings_panel = __commonJS({
                 border-color: var(--accent);
             }
 
+            .btn-danger {
+                background: transparent;
+                border: 1px solid rgba(239, 68, 68, 0.3);
+                color: #ef4444;
+                padding: 10px 16px;
+                border-radius: 8px;
+                font-size: 12px;
+                font-weight: 600;
+                cursor: pointer;
+                transition: all 0.2s ease;
+                width: 100%;
+            }
+            .btn-danger:hover {
+                background: rgba(239, 68, 68, 0.1);
+                border-color: #ef4444;
+            }
+
             .link-secondary {
                 color: var(--accent);
                 cursor: pointer;
@@ -536,6 +621,19 @@ var require_settings_panel = __commonJS({
                     <div id="bannedStatus" style="font-size: 12px; margin-top: 12px; text-align: center; height: 18px;"></div>
                 </div>
 
+                ${isPro2 && this.isPlanRecurring() ? `
+                <div class="section">
+                    <div class="section-label">\u{1F4B3} SUBSCRIPTION</div>
+                    <div style="font-size: 13px; opacity: 0.6; margin-bottom: 16px; line-height: 1.5;">
+                        Manage your Auto Accept Pro subscription
+                    </div>
+                    <button id="cancelSubBtn" class="btn-danger">
+                        Cancel Subscription
+                    </button>
+                    <div id="cancelStatus" style="font-size: 12px; margin-top: 12px; text-align: center; height: 18px;"></div>
+                </div>
+                ` : ""}
+
                 <div style="text-align: center; opacity: 0.15; font-size: 10px; padding: 20px 0; letter-spacing: 1px;">
                     REF: ${userId}
                 </div>
@@ -589,6 +687,17 @@ var require_settings_panel = __commonJS({
                         bannedStatus.innerText = '\u2713 Defaults Restored';
                         bannedStatus.style.color = 'var(--accent)';
                         setTimeout(() => { bannedStatus.innerText = ''; }, 3000);
+                    });
+                }
+
+                const cancelSubBtn = document.getElementById('cancelSubBtn');
+                const cancelStatus = document.getElementById('cancelStatus');
+
+                if (cancelSubBtn) {
+                    cancelSubBtn.addEventListener('click', () => {
+                        if (confirm('Are you sure you want to cancel your Pro subscription? You will lose access to Pro features at the end of your billing period.')) {
+                            vscode.postMessage({ command: 'cancelSubscription' });
+                        }
                     });
                 }
 
@@ -659,6 +768,9 @@ var require_settings_panel = __commonJS({
             res.on("end", () => {
               try {
                 const json = JSON.parse(data);
+                if (json.plan) {
+                  this.context.globalState.update("auto-accept-plan", json.plan);
+                }
                 resolve(json.isPro === true);
               } catch (e) {
                 resolve(false);
@@ -4500,6 +4612,327 @@ var require_cdp_handler = __commonJS({
   }
 });
 
+// setup-panel.js
+var require_setup_panel = __commonJS({
+  "setup-panel.js"(exports2) {
+    var vscode2 = require("vscode");
+    var SetupPanel = class _SetupPanel {
+      static currentPanel = void 0;
+      static createOrShow(extensionUri, script, platform, ideName) {
+        const column = vscode2.ViewColumn.One;
+        if (_SetupPanel.currentPanel) {
+          _SetupPanel.currentPanel._panel.reveal(column);
+          _SetupPanel.currentPanel._update(script, platform, ideName);
+          return;
+        }
+        const panel = vscode2.window.createWebviewPanel(
+          "autoAcceptSetup",
+          "Auto Accept Setup",
+          column,
+          {
+            enableScripts: true,
+            retainContextWhenHidden: true,
+            localResourceRoots: [vscode2.Uri.joinPath(extensionUri, "media"), extensionUri]
+          }
+        );
+        _SetupPanel.currentPanel = new _SetupPanel(panel, extensionUri, script, platform, ideName);
+      }
+      constructor(panel, extensionUri, script, platform, ideName) {
+        this._panel = panel;
+        this._extensionUri = extensionUri;
+        this._script = script;
+        this._platform = platform;
+        this._ideName = ideName;
+        this._disposables = [];
+        this._update(script, platform, ideName);
+        this._panel.onDidDispose(() => this.dispose(), null, this._disposables);
+        this._panel.webview.onDidReceiveMessage(
+          (message) => {
+            switch (message.command) {
+              case "copyScript":
+                vscode2.env.clipboard.writeText(this._script);
+                vscode2.window.showInformationMessage("\u2705 Script copied to clipboard!");
+                return;
+              case "openHelp":
+                vscode2.env.openExternal(vscode2.Uri.parse("https://github.com/MunKhin/auto-accept-agent/blob/master/SETUP_GUIDE.md"));
+                return;
+            }
+          },
+          null,
+          this._disposables
+        );
+      }
+      _update(script, platform, ideName) {
+        this._script = script;
+        this._platform = platform;
+        this._ideName = ideName;
+        this._panel.webview.html = this._getHtmlContent(script, platform, ideName);
+      }
+      _getHtmlContent(script, platform, ideName) {
+        const terminalName = platform === "win32" ? "PowerShell (as Administrator)" : "Terminal";
+        const iconUri = this._panel.webview.asWebviewUri(
+          vscode2.Uri.joinPath(this._extensionUri, "media", "icon.png")
+        );
+        return `<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Auto Accept Setup</title>
+    <style>
+        :root {
+            --bg: #0a0a0c;
+            --card-bg: #121216;
+            --border: rgba(147, 51, 234, 0.2);
+            --border-hover: rgba(147, 51, 234, 0.4);
+            --accent: #9333ea;
+            --accent-soft: rgba(147, 51, 234, 0.1);
+            --fg: #ffffff;
+            --fg-dim: rgba(255, 255, 255, 0.6);
+            --font: 'Segoe UI', system-ui, -apple-system, sans-serif;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: var(--font);
+            background: var(--bg);
+            color: var(--fg);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 40px 20px;
+        }
+
+        .container {
+            max-width: 500px;
+            width: 100%;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 32px;
+        }
+
+        .icon-img {
+            width: 64px;
+            height: 64px;
+            margin-bottom: 16px;
+        }
+
+        .header h1 {
+            font-size: 32px;
+            font-weight: 800;
+            margin-bottom: 8px;
+            letter-spacing: -0.5px;
+        }
+
+        .subtitle {
+            color: var(--fg-dim);
+            font-size: 14px;
+        }
+
+        .section {
+            background: var(--card-bg);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 24px;
+            margin-bottom: 16px;
+            transition: border-color 0.3s ease;
+        }
+
+        .section:hover {
+            border-color: var(--border-hover);
+        }
+
+        .step {
+            display: flex;
+            align-items: start;
+            gap: 16px;
+            margin-bottom: 20px;
+        }
+
+        .step:last-child {
+            margin-bottom: 0;
+        }
+
+        .step-number {
+            background: var(--accent);
+            color: white;
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 800;
+            flex-shrink: 0;
+            font-size: 16px;
+        }
+
+        .step-content {
+            flex: 1;
+            padding-top: 2px;
+        }
+
+        .step-title {
+            font-weight: 600;
+            margin-bottom: 4px;
+            font-size: 15px;
+        }
+
+        .step-description {
+            color: var(--fg-dim);
+            font-size: 13px;
+            line-height: 1.5;
+        }
+
+        .btn-copy {
+            width: 100%;
+            padding: 16px;
+            background: var(--accent);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 15px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            margin-top: 8px;
+        }
+
+        .btn-copy:hover {
+            background: #a855f7;
+            transform: translateY(-1px);
+        }
+
+        .btn-copy:active {
+            transform: translateY(0);
+        }
+
+        .warning {
+            background: var(--accent-soft);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 12px 16px;
+            font-size: 13px;
+            color: var(--fg-dim);
+            line-height: 1.5;
+        }
+
+        .warning strong {
+            color: var(--fg);
+            display: block;
+            margin-bottom: 4px;
+        }
+
+        .help-link {
+            text-align: center;
+            margin-top: 16px;
+        }
+
+        .help-link a {
+            color: var(--accent);
+            text-decoration: none;
+            font-size: 13px;
+            font-weight: 600;
+        }
+
+        .help-link a:hover {
+            text-decoration: underline;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <img src="${iconUri}" alt="Icon" class="icon-img">
+            <h1>Setup Required</h1>
+            <p class="subtitle">Enable Chrome DevTools Protocol for ${ideName}</p>
+        </div>
+
+        <div class="section">
+            <div class="step">
+                <div class="step-number">1</div>
+                <div class="step-content">
+                    <div class="step-title">Copy Setup Script</div>
+                    <div class="step-description">Click the button to copy the script to your clipboard</div>
+                    <button class="btn-copy" onclick="copyScript()">
+                        \u{1F4CB} Copy Setup Script
+                    </button>
+                </div>
+            </div>
+
+            <div class="step">
+                <div class="step-number">2</div>
+                <div class="step-content">
+                    <div class="step-title">Run in ${terminalName}</div>
+                    <div class="step-description">Paste and execute the script in ${terminalName}</div>
+                </div>
+            </div>
+
+            <div class="step">
+                <div class="step-number">3</div>
+                <div class="step-content">
+                    <div class="step-title">Restart ${ideName}</div>
+                    <div class="step-description">Completely close and restart ${ideName} for changes to take effect</div>
+                </div>
+            </div>
+        </div>
+
+        ${platform === "win32" ? `
+        <div class="warning">
+            <strong>\u26A0\uFE0F Windows Users</strong>
+            Right-click PowerShell and select "Run as Administrator" before pasting the script.
+        </div>
+        ` : ""}
+
+        <div class="help-link">
+            <a href="#" onclick="openHelp(); return false;">Need help? View setup guide \u2192</a>
+        </div>
+    </div>
+
+    <script>
+        const vscode = acquireVsCodeApi();
+
+        function copyScript() {
+            vscode.postMessage({ command: 'copyScript' });
+        }
+
+        function openHelp() {
+            vscode.postMessage({ command: 'openHelp' });
+        }
+    </script>
+</body>
+</html>`;
+      }
+      _escapeHtml(text) {
+        return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
+      }
+      dispose() {
+        _SetupPanel.currentPanel = void 0;
+        this._panel.dispose();
+        while (this._disposables.length) {
+          const disposable = this._disposables.pop();
+          if (disposable) {
+            disposable.dispose();
+          }
+        }
+      }
+    };
+    exports2.SetupPanel = SetupPanel;
+  }
+});
+
 // main_scripts/relauncher.js
 var require_relauncher = __commonJS({
   "main_scripts/relauncher.js"(exports2, module2) {
@@ -4534,7 +4967,15 @@ var require_relauncher = __commonJS({
         this.log("Checking if current process has CDP flag...");
         const hasFlag = await this.checkShortcutFlag();
         if (hasFlag) {
-          this.log("CDP flag already present in current process.");
+          this.log("CDP flag present but port inactive. Prompting for restart.");
+          vscode2.window.showWarningMessage(
+            `Auto Accept: The CDP flag is present, but the debugger port is not responding. Please completely close and restart ${ideName}.`,
+            "Restart Now"
+          ).then((selection) => {
+            if (selection === "Restart Now") {
+              vscode2.commands.executeCommand("workbench.action.reloadWindow");
+            }
+          });
           return { success: true, relaunched: false };
         }
         this.log("CDP flag missing in current process. Showing platform-specific script...");
@@ -4544,30 +4985,25 @@ var require_relauncher = __commonJS({
           vscode2.window.showErrorMessage(
             `Auto Accept: Unsupported platform. Please add --remote-debugging-port=9000 to your ${ideName} shortcut manually, then restart.`,
             "View Help"
-          ).then((selection2) => {
-            if (selection2 === "View Help") {
-              vscode2.env.openExternal(vscode2.Uri.parse("https://github.com/Antigravity-AI/auto-accept#background-mode-setup"));
+          ).then((selection) => {
+            if (selection === "View Help") {
+              vscode2.env.openExternal(vscode2.Uri.parse("https://github.com/MunKhin/auto-accept-agent/blob/master/SETUP_GUIDE.md"));
             }
           });
           return { success: false, relaunched: false };
         }
-        const message = `Auto Accept: CDP flag missing. To enable Background Mode, please run the script for ${ideName} on ${this.platform}.`;
-        const copyButton = "Copy Script to Clipboard";
-        const viewHelpButton = "View Help";
-        const selection = await vscode2.window.showInformationMessage(
-          message,
-          { modal: true, detail: `${instructions}
-
-Script:
-${script}` },
-          copyButton,
-          viewHelpButton
-        );
-        if (selection === copyButton) {
-          await vscode2.env.clipboard.writeText(script);
-          vscode2.window.showInformationMessage("Script copied to clipboard! Please paste it into a terminal and run it, then close and restart your IDE.");
-        } else if (selection === viewHelpButton) {
-          vscode2.env.openExternal(vscode2.Uri.parse("https://github.com/Antigravity-AI/auto-accept#background-mode-setup"));
+        try {
+          const { SetupPanel } = require_setup_panel();
+          const extensionPath = vscode2.extensions.getExtension("MunKhin.auto-accept-agent")?.extensionUri;
+          if (extensionPath) {
+            SetupPanel.createOrShow(extensionPath, script, this.platform, ideName);
+          } else {
+            this.log("Failed to get extension URI, falling back to notification");
+            await this.showFallbackNotification(script, ideName);
+          }
+        } catch (err) {
+          this.log(`Failed to load SetupPanel: ${err.message}, falling back to notification`);
+          await this.showFallbackNotification(script, ideName);
         }
         return { success: true, relaunched: false };
       }
@@ -4579,37 +5015,94 @@ ${script}` },
         return args.includes("--remote-debugging-port=9000");
       }
       /**
+       * Fallback notification if SetupPanel fails to load
+       */
+      async showFallbackNotification(script, ideName) {
+        const message = `Auto Accept: Click the button below to copy the setup script for ${ideName}.`;
+        const copyButton = "Copy Setup Script";
+        const viewHelpButton = "View Help";
+        const selection = await vscode2.window.showInformationMessage(
+          message,
+          copyButton,
+          viewHelpButton
+        );
+        if (selection === copyButton) {
+          await vscode2.env.clipboard.writeText(script);
+          const terminalName = this.platform === "win32" ? "PowerShell (as Administrator)" : "Terminal";
+          vscode2.window.showInformationMessage(`Script copied! Please paste and run it in ${terminalName}, then restart ${ideName}.`);
+        } else if (selection === viewHelpButton) {
+          vscode2.env.openExternal(vscode2.Uri.parse("https://github.com/Antigravity-AI/auto-accept#background-mode-setup"));
+        }
+      }
+      /**
        * Get platform-specific script and instructions for enabling CDP
        */
       async getPlatformScriptAndInstructions() {
         const ideName = this.getIdeName();
         const platform = this.platform;
         if (platform === "win32") {
-          const script = `$WshShell = New-Object -ComObject WScript.Shell
-$DesktopPath = [System.IO.Path]::Combine($env:USERPROFILE, "Desktop")
-$Shortcuts = Get-ChildItem "$DesktopPath\\*.lnk" | Where-Object { $_.Name -like "*${ideName}*" }
+          const script = `# Universal Windows Script - Adds CDP Port to ${ideName}
+Write-Host "=== ${ideName} CDP Setup ===" -ForegroundColor Cyan
+Write-Host "Searching for ${ideName} shortcuts..." -ForegroundColor Yellow
 
-if ($Shortcuts.Count -eq 0) {
-    Write-Host "No ${ideName} shortcut found on Desktop. Creating a new one..." -ForegroundColor Yellow
-    $ShortcutPath = "$DesktopPath\\${ideName}.lnk"
-    $Shortcut = $WshShell.CreateShortcut($ShortcutPath)
-    $Shortcut.TargetPath = "$env:LOCALAPPDATA\\Programs\\${ideName}\\${ideName}.exe"
-    $Shortcut.Arguments = "--remote-debugging-port=9000 --disable-gpu-driver-bug-workarounds --ignore-gpu-blacklist"
-    $Shortcut.Save()
-    Write-Host "Created new shortcut: $ShortcutPath" -ForegroundColor Green
-} else {
-    foreach ($ShortcutFile in $Shortcuts) {
-        $Shortcut = $WshShell.CreateShortcut($ShortcutFile.FullName)
-        $Args = $Shortcut.Arguments
-        if ($Args -match "--remote-debugging-port=\\d+") {
-            $Shortcut.Arguments = $Args -replace "--remote-debugging-port=\\d+", "--remote-debugging-port=9000"
-        } else {
-            $Shortcut.Arguments = "--remote-debugging-port=9000 " + $Args
-        }
-        $Shortcut.Save()
-        Write-Host "Updated $($ShortcutFile.Name) to port 9000" -ForegroundColor Green
+# Define search locations
+$searchLocations = @(
+    [Environment]::GetFolderPath('Desktop'),
+    "$env:USERPROFILE\\Desktop",
+    "$env:USERPROFILE\\OneDrive\\Desktop",
+    "$env:APPDATA\\Microsoft\\Windows\\Start Menu\\Programs",
+    "$env:ProgramData\\Microsoft\\Windows\\Start Menu\\Programs",
+    "$env:USERPROFILE\\AppData\\Roaming\\Microsoft\\Internet Explorer\\Quick Launch\\User Pinned\\TaskBar"
+)
+
+$WshShell = New-Object -ComObject WScript.Shell
+$foundShortcuts = @()
+
+# Search for shortcuts
+foreach ($location in $searchLocations) {
+    if (Test-Path $location) {
+        Write-Host "Searching: $location"
+        $shortcuts = Get-ChildItem -Path $location -Recurse -Filter "*.lnk" -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name -like "*${ideName}*" }
+        $foundShortcuts += $shortcuts
     }
-}`;
+}
+
+if ($foundShortcuts.Count -eq 0) {
+    Write-Host "No shortcuts found. Searching for ${ideName} installation..." -ForegroundColor Yellow
+    $exePath = "$env:LOCALAPPDATA\\Programs\\${ideName}\\${ideName}.exe"
+
+    if (Test-Path $exePath) {
+        $desktopPath = [Environment]::GetFolderPath('Desktop')
+        $shortcutPath = "$desktopPath\\${ideName}.lnk"
+        $shortcut = $WshShell.CreateShortcut($shortcutPath)
+        $shortcut.TargetPath = $exePath
+        $shortcut.Arguments = "--remote-debugging-port=9000"
+        $shortcut.Save()
+        Write-Host "Created new shortcut: $shortcutPath" -ForegroundColor Green
+    } else {
+        Write-Host "ERROR: ${ideName}.exe not found. Please install ${ideName} first." -ForegroundColor Red
+        exit 1
+    }
+} else {
+    Write-Host "Found $($foundShortcuts.Count) shortcut(s)" -ForegroundColor Green
+    foreach ($shortcutFile in $foundShortcuts) {
+        $shortcut = $WshShell.CreateShortcut($shortcutFile.FullName)
+        $originalArgs = $shortcut.Arguments
+
+        if ($originalArgs -match "--remote-debugging-port=\\d+") {
+            $shortcut.Arguments = $originalArgs -replace "--remote-debugging-port=\\d+", "--remote-debugging-port=9000"
+        } else {
+            $shortcut.Arguments = "--remote-debugging-port=9000 " + $originalArgs
+        }
+        $shortcut.Save()
+        Write-Host "Updated: $($shortcutFile.Name)" -ForegroundColor Green
+    }
+}
+
+Write-Host ""
+Write-Host "=== Setup Complete ===" -ForegroundColor Cyan
+Write-Host "Please restart ${ideName} completely for changes to take effect." -ForegroundColor Yellow`;
           return {
             script,
             instructions: `1. Open PowerShell as Administrator
@@ -4618,68 +5111,170 @@ if ($Shortcuts.Count -eq 0) {
 4. After the script completes, close and restart ${ideName} completely.`
           };
         } else if (platform === "darwin") {
-          const script = `open -n -a "${ideName}" --args --remote-debugging-port=9000 --disable-gpu-driver-bug-workarounds --ignore-gpu-blacklist`;
+          const script = `#!/bin/bash
+# Universal macOS Script - Adds CDP Port to ${ideName}
+
+echo "=== ${ideName} CDP Setup ==="
+echo ""
+
+IDE_NAME="${ideName}"
+
+# Search for the app
+APP_LOCATIONS=(
+    "/Applications"
+    "$HOME/Applications"
+    "/Applications/Utilities"
+)
+
+app_path=""
+for location in "\${APP_LOCATIONS[@]}"; do
+    if [ -d "$location" ]; then
+        echo "Searching: $location"
+        found=$(find "$location" -maxdepth 2 -name "*\${IDE_NAME}*.app" -type d 2>/dev/null | head -n1)
+        if [ -n "$found" ]; then
+            app_path="$found"
+            echo "Found: $app_path"
+            break
+        fi
+    fi
+done
+
+if [ -z "$app_path" ]; then
+    echo ""
+    echo "ERROR: ${ideName}.app not found in standard locations."
+    echo "Please install ${ideName} first."
+    exit 1
+fi
+
+info_plist="$app_path/Contents/Info.plist"
+
+if [ ! -f "$info_plist" ]; then
+    echo "ERROR: Info.plist not found at expected location."
+    exit 1
+fi
+
+echo ""
+echo "Checking Info.plist: $info_plist"
+
+# Check if CDP port already exists
+if grep -q "remote-debugging-port" "$info_plist"; then
+    echo "CDP port already configured in Info.plist"
+else
+    # Create backup
+    backup_plist="\${info_plist}.bak"
+    cp "$info_plist" "$backup_plist"
+    echo "Backup created: $backup_plist"
+
+    # Add CDP port configuration
+    # Insert before closing </dict> tag
+    sed -i '' '/<\\/dict>/i\\
+    <key>LSArguments<\\/key>\\
+    <array>\\
+        <string>--remote-debugging-port=9000<\\/string>\\
+    <\\/array>
+' "$info_plist"
+
+    echo "CDP port added to Info.plist"
+fi
+
+echo ""
+echo "=== Setup Complete ==="
+echo "Please quit and restart ${ideName} completely for changes to take effect."
+echo ""
+echo "To launch with CDP flag temporarily, you can also use:"
+echo "  open -n -a \\"${ideName}\\" --args --remote-debugging-port=9000"`;
           return {
             script,
             instructions: `1. Open Terminal
-2. Copy the command above and paste it into Terminal
+2. Copy the script above and paste it into Terminal
 3. Press Enter to run
-4. This will launch ${ideName} with the required flag. You can also add the flag to your Dock icon: Right-click ${ideName} in Dock > Options > Keep in Dock, then edit the application's Info.plist.`
+4. After the script completes, quit and restart ${ideName} completely.`
           };
         } else if (platform === "linux") {
           const script = `#!/bin/bash
-# Detect desktop environment
-DESKTOP=\${XDG_CURRENT_DESKTOP:-""}
+# Universal Linux Script - Adds CDP Port to ${ideName}
+
+echo "=== ${ideName} CDP Setup ==="
+echo ""
+echo "Searching for ${ideName} shortcuts..."
+
 IDE_NAME="${ideName}"
 IDE_NAME_LOWER=$(echo "$IDE_NAME" | tr '[:upper:]' '[:lower:]')
 
-# Function to modify .desktop file
-modify_desktop_file() {
+# Define search locations for .desktop files
+SEARCH_LOCATIONS=(
+    "$HOME/.local/share/applications"
+    "$HOME/Desktop"
+    "$HOME/.config/autostart"
+    "/usr/share/applications"
+    "/usr/local/share/applications"
+    "/var/lib/snapd/desktop/applications"
+    "/var/lib/flatpak/exports/share/applications"
+)
+
+# Function to add CDP port to a .desktop file
+add_cdp_to_desktop_file() {
     local desktop_file="$1"
     local backup_file="\${desktop_file}.bak"
-    
-    # Create backup
-    cp "$desktop_file" "$backup_file"
-    
-    # Check if flag already exists
-    if grep -q "--remote-debugging-port=9000" "$desktop_file"; then
-        echo "Flag already present in $desktop_file"
+
+    # Check if CDP port already exists
+    if grep -q "remote-debugging-port" "$desktop_file"; then
+        echo "  Status: CDP port already present"
         return 0
     fi
-    
-    # Add flag to Exec line
-    sed -i 's|^Exec=.*|& --remote-debugging-port=9000|' "$desktop_file"
-    
-    # Also add flag to TryExec if present
+
+    # Create backup
+    cp "$desktop_file" "$backup_file"
+    echo "  Backup created: $backup_file"
+
+    # Add CDP port to Exec lines
+    sed -i 's|^Exec=\\(.*\\)$|Exec=\\1 --remote-debugging-port=9000|' "$desktop_file"
+
+    # Add to TryExec if present
     if grep -q "^TryExec=" "$desktop_file"; then
-        sed -i 's|^TryExec=.*|& --remote-debugging-port=9000|' "$desktop_file"
+        sed -i 's|^TryExec=\\(.*\\)$|TryExec=\\1 --remote-debugging-port=9000|' "$desktop_file"
     fi
-    
-    echo "Modified $desktop_file"
+
+    echo "  Status: CDP port added"
     return 0
 }
 
-# Search for .desktop files in common locations
-DESKTOP_DIRS=(
-    "$HOME/.local/share/applications"
-    "/usr/share/applications"
-    "/usr/local/share/applications"
-)
+found_count=0
 
-for dir in "\${DESKTOP_DIRS[@]}"; do
+# Search for .desktop files
+for dir in "\${SEARCH_LOCATIONS[@]}"; do
     if [ -d "$dir" ]; then
+        echo "Searching: $dir"
+
         for file in "$dir"/*.desktop; do
             if [ -f "$file" ]; then
-                if grep -qi "$IDE_NAME_LOWER" "$file" || grep -qi "cursor" "$file"; then
-                    echo "Found: $file"
-                    modify_desktop_file "$file"
+                # Check if file contains the IDE name
+                if grep -qi "$IDE_NAME_LOWER" "$file" 2>/dev/null; then
+                    echo ""
+                    echo "---"
+                    echo "Found: $(basename "$file")"
+                    echo "Location: $file"
+
+                    found_count=$((found_count + 1))
+                    add_cdp_to_desktop_file "$file"
                 fi
             fi
         done
     fi
 done
 
-echo "Script completed. Please close and restart ${ideName}."`;
+echo ""
+echo "=== Setup Complete ==="
+echo "Total shortcuts found: $found_count"
+
+if [ $found_count -eq 0 ]; then
+    echo ""
+    echo "No shortcuts found for '$IDE_NAME'."
+    echo "Please make sure ${ideName} is installed."
+else
+    echo ""
+    echo "Please restart ${ideName} completely for changes to take effect."
+fi`;
           return {
             script,
             instructions: `1. Open Terminal
