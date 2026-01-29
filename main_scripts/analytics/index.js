@@ -271,7 +271,7 @@
                 currentMode: null,
                 startTimes: {},
                 bannedCommands: [],
-                isPro: false,
+                isPro: true, // All features now free
                 stats: createDefaultStats()
             };
             log('[Analytics] State initialized');

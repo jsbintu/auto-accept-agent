@@ -54,10 +54,9 @@ class SettingsPanel {
             async (message) => {
                 switch (message.command) {
                     case 'setFrequency':
-                        if (this.isPro()) {
-                            await this.context.globalState.update('auto-accept-frequency', message.value);
-                            vscode.commands.executeCommand('auto-accept.updateFrequency', message.value);
-                        }
+                        // Frequency adjustment now available to all users
+                        await this.context.globalState.update('auto-accept-frequency', message.value);
+                        vscode.commands.executeCommand('auto-accept.updateFrequency', message.value);
                         break;
                     case 'getStats':
                         this.sendStats();
@@ -66,10 +65,9 @@ class SettingsPanel {
                         this.sendROIStats();
                         break;
                     case 'updateBannedCommands':
-                        if (this.isPro()) {
-                            await this.context.globalState.update('auto-accept-banned-commands', message.commands);
-                            vscode.commands.executeCommand('auto-accept.updateBannedCommands', message.commands);
-                        }
+                        // Banned commands customization now available to all users
+                        await this.context.globalState.update('auto-accept-banned-commands', message.commands);
+                        vscode.commands.executeCommand('auto-accept.updateBannedCommands', message.commands);
                         break;
                     case 'getBannedCommands':
                         this.sendBannedCommands();
@@ -184,7 +182,8 @@ class SettingsPanel {
     }
 
     isPro() {
-        return this.context.globalState.get('auto-accept-isPro', false);
+        // All features now free - always return true
+        return true;
     }
 
     isPlanRecurring() {
@@ -224,9 +223,8 @@ class SettingsPanel {
             sessions: 0,
             lastSession: null
         });
-        const isPro = this.isPro();
-        // If not Pro, force display of 300ms
-        const frequency = isPro ? this.context.globalState.get('auto-accept-frequency', 1000) : 300;
+        const isPro = true; // All features now free
+        const frequency = this.context.globalState.get('auto-accept-frequency', 1000);
 
         this.panel.webview.postMessage({
             command: 'updateStats',
@@ -572,23 +570,7 @@ class SettingsPanel {
                     <div class="subtitle">Multi-agent automation for Antigravity & Cursor</div>
                 </div>
 
-                ${!isPro ? `
-                <div class="section" style="background: var(--accent-soft); border-color: var(--accent); position: relative; overflow: hidden;">
-                    <div style="position: absolute; top: -20px; right: -20px; font-size: 80px; opacity: 0.05; transform: rotate(15deg);">🚀</div>
-                    <div class="section-label" style="color: white; margin-bottom: 12px; font-size: 14px;">🔥 Upgrade to Pro</div>
-                    <div style="font-size: 14px; line-height: 1.6; margin-bottom: 24px; color: rgba(255,255,255,0.9);">
-                        Automate up to 5 agents in parallel. Join 500+ devs saving hours every week.
-                    </div>
-                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
-                        <a href="${stripeLinks.MONTHLY}" class="btn-primary">
-                            $5 / Month
-                        </a>
-                        <a href="${stripeLinks.YEARLY}" class="btn-primary" style="background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2);">
-                            $29 / Year
-                        </a>
-                    </div>
-                </div>
-                ` : ''}
+                <!-- All features now free - upgrade section removed -->
 
                 <div class="section">
                     <div class="section-label">
@@ -620,14 +602,13 @@ class SettingsPanel {
                         <span>⚡ Performance Mode</span>
                         <span class="val-display" id="freqVal" style="color: var(--accent);">...</span>
                     </div>
-                    <div class="${!isPro ? 'locked' : ''}">
+                    <div>
                         <div style="display: flex; gap: 12px; align-items: center; margin-bottom: 8px;">
                             <span style="font-size: 12px; opacity: 0.5;">Instant</span>
                             <div style="flex: 1;"><input type="range" id="freqSlider" min="200" max="3000" step="100" value="1000"></div>
                             <span style="font-size: 12px; opacity: 0.5;">Battery Saving</span>
                         </div>
                     </div>
-                    ${!isPro ? '<div class="pro-tip">Locked: Pro users get 200ms ultra-low latency mode</div>' : ''}
                 </div>
 
                 <div class="section">
@@ -636,10 +617,9 @@ class SettingsPanel {
                         Patterns that will NEVER be auto-accepted.
                     </div>
                     <textarea id="bannedCommandsInput" 
-                        placeholder="rm -rf /&#10;format c:&#10;del /f /s /q"
-                        ${!isPro ? 'readonly' : ''}></textarea>
+                        placeholder="rm -rf /&#10;format c:&#10;del /f /s /q"></textarea>
                     
-                    <div class="${!isPro ? 'locked' : ''}" style="display: flex; gap: 12px; margin-top: 20px;">
+                    <div style="display: flex; gap: 12px; margin-top: 20px;">
                         <button id="saveBannedBtn" class="btn-primary" style="flex: 2;">
                             Update Rules
                         </button>
@@ -648,20 +628,7 @@ class SettingsPanel {
                         </button>
                     </div>
                     <div id="bannedStatus" style="font-size: 12px; margin-top: 12px; text-align: center; height: 18px;"></div>
-                </div>
-
-                ${isPro && this.isPlanRecurring() ? `
-                <div class="section">
-                    <div class="section-label">💳 SUBSCRIPTION</div>
-                    <div style="font-size: 13px; opacity: 0.6; margin-bottom: 16px; line-height: 1.5;">
-                        Manage your Auto Accept Pro subscription
-                    </div>
-                    <button id="cancelSubBtn" class="btn-danger">
-                        Cancel Subscription
-                    </button>
-                    <div id="cancelStatus" style="font-size: 12px; margin-top: 12px; text-align: center; height: 18px;"></div>
-                </div>
-                ` : ''}
+                </div>\n\n                <!-- Subscription management removed - all features now free -->
 
                 <div style="text-align: center; opacity: 0.15; font-size: 10px; padding: 20px 0; letter-spacing: 1px;">
                     REF: ${userId}

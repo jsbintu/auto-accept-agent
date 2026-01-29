@@ -29,9 +29,9 @@ const HEARTBEAT_KEY = 'auto-accept-instance-heartbeat';
 const INSTANCE_ID = Math.random().toString(36).substring(7);
 
 let isEnabled = false;
-let isPro = false;
+let isPro = true; // All features now free by default
 let isLockedOut = false; // Local tracking
-let pollFrequency = 2000; // Default for Free
+let pollFrequency = 1000; // Pro speed for all users
 let bannedCommands = []; // List of command patterns to block
 
 // Background Mode state
@@ -108,14 +108,11 @@ async function activate(context) {
     try {
         // 1. Initialize State
         isEnabled = context.globalState.get(GLOBAL_STATE_KEY, false);
-        isPro = context.globalState.get(PRO_STATE_KEY, false);
+        isPro = true; // All features now free - always Pro
+        await context.globalState.update(PRO_STATE_KEY, true); // Persist Pro status
 
-        // Load frequency
-        if (isPro) {
-            pollFrequency = context.globalState.get(FREQ_STATE_KEY, 1000);
-        } else {
-            pollFrequency = 300; // Enforce fast polling (0.3s) for free users
-        }
+        // Load frequency - Pro speed for all users
+        pollFrequency = context.globalState.get(FREQ_STATE_KEY, 1000);
 
         // Load background mode state
         backgroundModeEnabled = context.globalState.get(BACKGROUND_MODE_KEY, false);
@@ -137,27 +134,8 @@ async function activate(context) {
         bannedCommands = context.globalState.get(BANNED_COMMANDS_KEY, defaultBannedCommands);
 
 
-        // 1.5 Verify License Background Check
-        verifyLicense(context).then(isValid => {
-            if (isPro !== isValid) {
-                isPro = isValid;
-                context.globalState.update(PRO_STATE_KEY, isValid);
-                log(`License re-verification: Updated Pro status to ${isValid}`);
-
-                if (cdpHandler && cdpHandler.setProStatus) {
-                    cdpHandler.setProStatus(isValid);
-                }
-
-                if (!isValid) {
-                    pollFrequency = 300; // Downgrade speed
-                    if (backgroundModeEnabled) {
-                        // Optional: Disable background mode visual toggle if desired, 
-                        // but logic gate handles it.
-                    }
-                }
-                updateStatusBar();
-            }
-        });
+        // License verification disabled - all features are free now
+        log('All Pro features enabled by default - no license verification needed');
 
         currentIDE = detectIDE();
 
@@ -378,11 +356,7 @@ async function handleFrequencyUpdate(context, freq) {
 }
 
 async function handleBannedCommandsUpdate(context, commands) {
-    // Only Pro users can customize the banned list
-    if (!isPro) {
-        log('Banned commands customization requires Pro');
-        return;
-    }
+    // Banned command customization now available to all users
     bannedCommands = Array.isArray(commands) ? commands : [];
     await context.globalState.update(BANNED_COMMANDS_KEY, bannedCommands);
     log(`Banned commands updated: ${bannedCommands.length} patterns`);
@@ -397,20 +371,7 @@ async function handleBannedCommandsUpdate(context, commands) {
 async function handleBackgroundToggle(context) {
     log('Background toggle clicked');
 
-    // Free tier: Show Pro message
-
-    if (!isPro) {
-        vscode.window.showInformationMessage(
-            'Background Mode is a Pro feature.',
-            'Learn More'
-        ).then(choice => {
-            if (choice === 'Learn More') {
-                const panel = getSettingsPanel();
-                if (panel) panel.createOrShow(context.extensionUri, context);
-            }
-        });
-        return;
-    }
+    // Background mode now available to all users (no Pro restriction)
 
     // Pro tier: Check if we should show first-time dialog
     const dontShowAgain = context.globalState.get(BACKGROUND_DONT_SHOW_KEY, false);
@@ -672,32 +633,11 @@ async function showAwayActionsNotification(context, actionsCount) {
     });
 }
 
-// --- BACKGROUND MODE UPSELL ---
-// Called when free user switches tabs (could have been auto-handled)
+// --- BACKGROUND MODE UPSELL (DISABLED) ---
+// All features now free - no upsell needed
 async function showBackgroundModeUpsell(context) {
-    if (isPro) return; // Already Pro, no upsell
-
-    const UPSELL_COOLDOWN_KEY = 'auto-accept-bg-upsell-last';
-    const UPSELL_COOLDOWN_MS = 1000 * 60 * 30; // 30 minutes between upsells
-
-    const lastUpsell = context.globalState.get(UPSELL_COOLDOWN_KEY, 0);
-    const now = Date.now();
-
-    if (now - lastUpsell < UPSELL_COOLDOWN_MS) return; // Too soon
-
-    await context.globalState.update(UPSELL_COOLDOWN_KEY, now);
-
-    const choice = await vscode.window.showInformationMessage(
-        `💡 Auto Accept could've handled this tab switch automatically.`,
-        { detail: 'Enable Background Mode to keep all your agents moving in parallel—no manual tab switching needed.' },
-        'Enable Background Mode',
-        'Not Now'
-    );
-
-    if (choice === 'Enable Background Mode') {
-        const panel = getSettingsPanel();
-        if (panel) panel.createOrShow(context.extensionUri, context);
-    }
+    // Upsell disabled - all users have Pro features
+    return;
 }
 
 // --- AWAY MODE POLLING ---
@@ -820,49 +760,13 @@ function updateStatusBar() {
 
 // Re-implement checkInstanceLock correctly with context
 async function checkInstanceLock() {
-    if (isPro) return true;
-    if (!globalContext) return true; // Should not happen
-
-    const lockId = globalContext.globalState.get(LOCK_KEY);
-    const lastHeartbeat = globalContext.globalState.get(HEARTBEAT_KEY, 0);
-    const now = Date.now();
-
-    // 1. If no lock or lock is stale (>10s), claim it
-    if (!lockId || (now - lastHeartbeat > 10000)) {
-        await globalContext.globalState.update(LOCK_KEY, INSTANCE_ID);
-        await globalContext.globalState.update(HEARTBEAT_KEY, now);
-        return true;
-    }
-
-    // 2. If we own the lock, update heartbeat
-    if (lockId === INSTANCE_ID) {
-        await globalContext.globalState.update(HEARTBEAT_KEY, now);
-        return true;
-    }
-
-    // 3. Someone else owns the lock and it's fresh
-    return false;
+    // All users now have Pro - no instance locking restrictions
+    return true;
 }
 
 async function verifyLicense(context) {
-    const userId = context.globalState.get('auto-accept-userId');
-    if (!userId) return false;
-
-    return new Promise((resolve) => {
-        const https = require('https');
-        https.get(`${LICENSE_API}/check-license?userId=${userId}`, (res) => {
-            let data = '';
-            res.on('data', chunk => data += chunk);
-            res.on('end', () => {
-                try {
-                    const json = JSON.parse(data);
-                    resolve(json.isPro === true);
-                } catch (e) {
-                    resolve(false);
-                }
-            });
-        }).on('error', () => resolve(false));
-    });
+    // License verification disabled - all features are free
+    return true;
 }
 
 // Handle Pro activation (called from URI handler or command)

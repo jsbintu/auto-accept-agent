@@ -20,7 +20,7 @@ var require_settings_panel = __commonJS({
   "settings-panel.js"(exports2, module2) {
     var vscode2 = require("vscode");
     var { STRIPE_LINKS } = require_config();
-    var LICENSE_API2 = "https://auto-accept-backend.onrender.com/api";
+    var LICENSE_API = "https://auto-accept-backend.onrender.com/api";
     var SettingsPanel2 = class _SettingsPanel {
       static currentPanel = void 0;
       static viewType = "autoAcceptSettings";
@@ -58,10 +58,8 @@ var require_settings_panel = __commonJS({
           async (message) => {
             switch (message.command) {
               case "setFrequency":
-                if (this.isPro()) {
-                  await this.context.globalState.update("auto-accept-frequency", message.value);
-                  vscode2.commands.executeCommand("auto-accept.updateFrequency", message.value);
-                }
+                await this.context.globalState.update("auto-accept-frequency", message.value);
+                vscode2.commands.executeCommand("auto-accept.updateFrequency", message.value);
                 break;
               case "getStats":
                 this.sendStats();
@@ -70,10 +68,8 @@ var require_settings_panel = __commonJS({
                 this.sendROIStats();
                 break;
               case "updateBannedCommands":
-                if (this.isPro()) {
-                  await this.context.globalState.update("auto-accept-banned-commands", message.commands);
-                  vscode2.commands.executeCommand("auto-accept.updateBannedCommands", message.commands);
-                }
+                await this.context.globalState.update("auto-accept-banned-commands", message.commands);
+                vscode2.commands.executeCommand("auto-accept.updateBannedCommands", message.commands);
                 break;
               case "getBannedCommands":
                 this.sendBannedCommands();
@@ -176,7 +172,7 @@ var require_settings_panel = __commonJS({
         }
       }
       isPro() {
-        return this.context.globalState.get("auto-accept-isPro", false);
+        return true;
       }
       isPlanRecurring() {
         const plan = this.context.globalState.get("auto-accept-plan", "lifetime");
@@ -207,8 +203,8 @@ var require_settings_panel = __commonJS({
           sessions: 0,
           lastSession: null
         });
-        const isPro2 = this.isPro();
-        const frequency = isPro2 ? this.context.globalState.get("auto-accept-frequency", 1e3) : 300;
+        const isPro2 = true;
+        const frequency = this.context.globalState.get("auto-accept-frequency", 1e3);
         this.panel.webview.postMessage({
           command: "updateStats",
           stats,
@@ -543,23 +539,7 @@ var require_settings_panel = __commonJS({
                     <div class="subtitle">Multi-agent automation for Antigravity & Cursor</div>
                 </div>
 
-                ${!isPro2 ? `
-                <div class="section" style="background: var(--accent-soft); border-color: var(--accent); position: relative; overflow: hidden;">
-                    <div style="position: absolute; top: -20px; right: -20px; font-size: 80px; opacity: 0.05; transform: rotate(15deg);">\u{1F680}</div>
-                    <div class="section-label" style="color: white; margin-bottom: 12px; font-size: 14px;">\u{1F525} Upgrade to Pro</div>
-                    <div style="font-size: 14px; line-height: 1.6; margin-bottom: 24px; color: rgba(255,255,255,0.9);">
-                        Automate up to 5 agents in parallel. Join 500+ devs saving hours every week.
-                    </div>
-                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
-                        <a href="${stripeLinks.MONTHLY}" class="btn-primary">
-                            $5 / Month
-                        </a>
-                        <a href="${stripeLinks.YEARLY}" class="btn-primary" style="background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2);">
-                            $29 / Year
-                        </a>
-                    </div>
-                </div>
-                ` : ""}
+                <!-- All features now free - upgrade section removed -->
 
                 <div class="section">
                     <div class="section-label">
@@ -591,14 +571,13 @@ var require_settings_panel = __commonJS({
                         <span>\u26A1 Performance Mode</span>
                         <span class="val-display" id="freqVal" style="color: var(--accent);">...</span>
                     </div>
-                    <div class="${!isPro2 ? "locked" : ""}">
+                    <div>
                         <div style="display: flex; gap: 12px; align-items: center; margin-bottom: 8px;">
                             <span style="font-size: 12px; opacity: 0.5;">Instant</span>
                             <div style="flex: 1;"><input type="range" id="freqSlider" min="200" max="3000" step="100" value="1000"></div>
                             <span style="font-size: 12px; opacity: 0.5;">Battery Saving</span>
                         </div>
                     </div>
-                    ${!isPro2 ? '<div class="pro-tip">Locked: Pro users get 200ms ultra-low latency mode</div>' : ""}
                 </div>
 
                 <div class="section">
@@ -607,10 +586,9 @@ var require_settings_panel = __commonJS({
                         Patterns that will NEVER be auto-accepted.
                     </div>
                     <textarea id="bannedCommandsInput" 
-                        placeholder="rm -rf /&#10;format c:&#10;del /f /s /q"
-                        ${!isPro2 ? "readonly" : ""}></textarea>
+                        placeholder="rm -rf /&#10;format c:&#10;del /f /s /q"></textarea>
                     
-                    <div class="${!isPro2 ? "locked" : ""}" style="display: flex; gap: 12px; margin-top: 20px;">
+                    <div style="display: flex; gap: 12px; margin-top: 20px;">
                         <button id="saveBannedBtn" class="btn-primary" style="flex: 2;">
                             Update Rules
                         </button>
@@ -621,18 +599,7 @@ var require_settings_panel = __commonJS({
                     <div id="bannedStatus" style="font-size: 12px; margin-top: 12px; text-align: center; height: 18px;"></div>
                 </div>
 
-                ${isPro2 && this.isPlanRecurring() ? `
-                <div class="section">
-                    <div class="section-label">\u{1F4B3} SUBSCRIPTION</div>
-                    <div style="font-size: 13px; opacity: 0.6; margin-bottom: 16px; line-height: 1.5;">
-                        Manage your Auto Accept Pro subscription
-                    </div>
-                    <button id="cancelSubBtn" class="btn-danger">
-                        Cancel Subscription
-                    </button>
-                    <div id="cancelStatus" style="font-size: 12px; margin-top: 12px; text-align: center; height: 18px;"></div>
-                </div>
-                ` : ""}
+                <!-- Subscription management removed - all features now free -->
 
                 <div style="text-align: center; opacity: 0.15; font-size: 10px; padding: 20px 0; letter-spacing: 1px;">
                     REF: ${userId}
@@ -762,7 +729,7 @@ var require_settings_panel = __commonJS({
       async checkProStatus(userId) {
         return new Promise((resolve) => {
           const https = require("https");
-          https.get(`${LICENSE_API2}/verify?userId=${userId}`, (res) => {
+          https.get(`${LICENSE_API}/verify?userId=${userId}`, (res) => {
             let data = "";
             res.on("data", (chunk) => data += chunk);
             res.on("end", () => {
@@ -5315,12 +5282,11 @@ var FREQ_STATE_KEY = "auto-accept-frequency";
 var BANNED_COMMANDS_KEY = "auto-accept-banned-commands";
 var ROI_STATS_KEY = "auto-accept-roi-stats";
 var SECONDS_PER_CLICK = 5;
-var LICENSE_API = "https://auto-accept-backend.onrender.com/api";
 var INSTANCE_ID = Math.random().toString(36).substring(7);
 var isEnabled = false;
-var isPro = false;
+var isPro = true;
 var isLockedOut = false;
-var pollFrequency = 2e3;
+var pollFrequency = 1e3;
 var bannedCommands = [];
 var backgroundModeEnabled = false;
 var BACKGROUND_DONT_SHOW_KEY = "auto-accept-background-dont-show";
@@ -5380,12 +5346,9 @@ async function activate(context) {
   }
   try {
     isEnabled = context.globalState.get(GLOBAL_STATE_KEY, false);
-    isPro = context.globalState.get(PRO_STATE_KEY, false);
-    if (isPro) {
-      pollFrequency = context.globalState.get(FREQ_STATE_KEY, 1e3);
-    } else {
-      pollFrequency = 300;
-    }
+    isPro = true;
+    await context.globalState.update(PRO_STATE_KEY, true);
+    pollFrequency = context.globalState.get(FREQ_STATE_KEY, 1e3);
     backgroundModeEnabled = context.globalState.get(BACKGROUND_MODE_KEY, false);
     const defaultBannedCommands = [
       "rm -rf /",
@@ -5402,22 +5365,7 @@ async function activate(context) {
       "chmod -R 777 /"
     ];
     bannedCommands = context.globalState.get(BANNED_COMMANDS_KEY, defaultBannedCommands);
-    verifyLicense(context).then((isValid) => {
-      if (isPro !== isValid) {
-        isPro = isValid;
-        context.globalState.update(PRO_STATE_KEY, isValid);
-        log(`License re-verification: Updated Pro status to ${isValid}`);
-        if (cdpHandler && cdpHandler.setProStatus) {
-          cdpHandler.setProStatus(isValid);
-        }
-        if (!isValid) {
-          pollFrequency = 300;
-          if (backgroundModeEnabled) {
-          }
-        }
-        updateStatusBar();
-      }
-    });
+    log("All Pro features enabled by default - no license verification needed");
     currentIDE = detectIDE();
     outputChannel = vscode.window.createOutputChannel("Auto Accept");
     context.subscriptions.push(outputChannel);
@@ -5583,10 +5531,6 @@ async function handleFrequencyUpdate(context, freq) {
   }
 }
 async function handleBannedCommandsUpdate(context, commands) {
-  if (!isPro) {
-    log("Banned commands customization requires Pro");
-    return;
-  }
   bannedCommands = Array.isArray(commands) ? commands : [];
   await context.globalState.update(BANNED_COMMANDS_KEY, bannedCommands);
   log(`Banned commands updated: ${bannedCommands.length} patterns`);
@@ -5599,18 +5543,6 @@ async function handleBannedCommandsUpdate(context, commands) {
 }
 async function handleBackgroundToggle(context) {
   log("Background toggle clicked");
-  if (!isPro) {
-    vscode.window.showInformationMessage(
-      "Background Mode is a Pro feature.",
-      "Learn More"
-    ).then((choice) => {
-      if (choice === "Learn More") {
-        const panel = getSettingsPanel();
-        if (panel) panel.createOrShow(context.extensionUri, context);
-      }
-    });
-    return;
-  }
   const dontShowAgain = context.globalState.get(BACKGROUND_DONT_SHOW_KEY, false);
   if (!dontShowAgain && !backgroundModeEnabled) {
     const choice = await vscode.window.showInformationMessage(
@@ -5902,23 +5834,7 @@ function updateStatusBar() {
   }
 }
 async function verifyLicense(context) {
-  const userId = context.globalState.get("auto-accept-userId");
-  if (!userId) return false;
-  return new Promise((resolve) => {
-    const https = require("https");
-    https.get(`${LICENSE_API}/check-license?userId=${userId}`, (res) => {
-      let data = "";
-      res.on("data", (chunk) => data += chunk);
-      res.on("end", () => {
-        try {
-          const json = JSON.parse(data);
-          resolve(json.isPro === true);
-        } catch (e) {
-          resolve(false);
-        }
-      });
-    }).on("error", () => resolve(false));
-  });
+  return true;
 }
 async function handleProActivation(context) {
   log("Pro Activation: Starting verification process...");

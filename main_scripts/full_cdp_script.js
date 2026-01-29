@@ -157,7 +157,7 @@
                     currentMode: null,
                     startTimes: {},
                     bannedCommands: [],
-                    isPro: false,
+                    isPro: true, // All features now free
                     stats: createDefaultStats()
                 };
                 log('[Analytics] State initialized');
@@ -964,15 +964,11 @@
 
             log(`Agent Loaded (IDE: ${ide}, BG: ${isBG}, isPro: ${isPro})`, true);
 
-            if (isBG && isPro) {
+            // Background mode now available to all users (no Pro restriction)
+            if (isBG) {
                 log(`[BG] Creating overlay and starting loop...`);
                 showOverlay();
                 log(`[BG] Overlay created, starting ${ide} loop...`);
-                if (ide === 'cursor') cursorLoop(sid);
-                else antigravityLoop(sid);
-            } else if (isBG && !isPro) {
-                log(`[BG] Background mode requires Pro, showing overlay anyway...`);
-                showOverlay();
                 if (ide === 'cursor') cursorLoop(sid);
                 else antigravityLoop(sid);
             } else {
